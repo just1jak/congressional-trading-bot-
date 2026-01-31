@@ -1,0 +1,41 @@
+# Core dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# CLI interface
+click>=8.1.0
+rich>=13.0.0
+python-dotenv>=1.0.0
+
+# Data and APIs
+yfinance>=0.2.0
+schwab-py>=0.3.0
+alpaca-trade-api>=3.0.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# Date handling
+python-dateutil>=2.8.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+
+# Backtesting
+backtrader>=1.9.78
+matplotlib>=3.7.0
+
+# Utilities
+pyyaml>=6.0
+pytz>=2023.3
+
+# Logging
+loguru>=0.7.0
+
+# API rate limiting
+ratelimit>=2.2.1

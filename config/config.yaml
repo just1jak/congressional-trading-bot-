@@ -1,0 +1,69 @@
+# Congressional Trading Bot Configuration
+
+# Risk Management
+risk_management:
+  profit_threshold: 0.20  # 20% profit target
+  stop_loss: -0.10  # 10% stop loss (optional)
+  max_position_size: 0.05  # 5% of portfolio per position
+  max_positions: 10  # Maximum concurrent positions
+  min_position_value: 1000  # Minimum dollars per position
+
+# Trading Strategy
+strategy:
+  # How to handle conflicting trades (buy vs sell)
+  conflict_resolution: "dollar_weighted"  # Options: dollar_weighted, senator_track_record, unanimous_only, committee_weighted
+
+  # Weighting factors for conflict resolution
+  buy_threshold_multiplier: 1.5  # Buy signal needs to be 1.5x stronger than sell
+
+  # Time window for aggregating trades
+  trade_aggregation_window_days: 7  # Aggregate trades within 7 days
+
+  # Minimum confidence threshold
+  min_confidence: 0.6  # 0-1 scale
+
+# Execution Timing
+execution:
+  timing_mode: "next_open"  # Options: immediate, next_open, daily_batch, manual
+  batch_execution_time: "09:35"  # For daily_batch mode (market time)
+
+# Data Collection
+data_collection:
+  update_frequency_hours: 24  # How often to check for new trades
+  historical_lookback_days: 30  # How far back to fetch on updates
+  cache_duration_hours: 12  # How long to cache stock prices
+
+  # Data sources (in order of preference)
+  sources:
+    - type: "senate_stock_watcher"
+      enabled: false  # Enable when API key available
+    - type: "capitol_trades"
+      enabled: false  # Enable when API key available
+    - type: "senate_efds"
+      enabled: true  # Direct scraping from efdsearch.senate.gov
+
+# Backtesting
+backtesting:
+  default_initial_capital: 100000
+  commission_per_trade: 0  # Commission in dollars (set to 0 for commission-free brokers)
+  slippage_percent: 0.001  # 0.1% slippage estimate
+
+# Politician Filtering (optional)
+politician_filter:
+  enabled: false
+  # If enabled, only track these politicians
+  whitelist: []
+  # Example:
+  # - "Nancy Pelosi"
+  # - "Dan Crenshaw"
+
+  # Exclude these politicians
+  blacklist: []
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_to_file: true
+  log_file: "logs/trading_bot.log"
+  max_log_size_mb: 100
+  backup_count: 5

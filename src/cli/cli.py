@@ -1,0 +1,443 @@
+"""Command-line interface for Congressional Trading Bot"""
+
+import click
+from rich.console import Console
+from rich.table import Table
+from rich import print as rprint
+from datetime import datetime, date, timedelta
+from pathlib import Path
+import sys
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from src.data.database import init_database, get_database
+from src.data.collectors.congressional_trades import CongressionalTradeCollector
+from src.data.collectors.stock_prices import StockPriceCollector
+from src.strategy.signal_generator import SignalGenerator, Signal
+from src.strategy.risk_manager import RiskManager
+from src.utils.logger import setup_logger, get_logger
+from src.utils.helpers import format_currency, format_percentage
+
+console = Console()
+
+
+@click.group()
+@click.option('--debug', is_flag=True, help='Enable debug logging')
+def cli(debug):
+    """Congressional Trading Bot - Track and replicate congressional stock trades"""
+    # Setup logging
+    setup_logger()
+
+    if debug:
+        logger = get_logger()
+        logger.level("DEBUG")
+
+    # Initialize database
+    init_database()
+
+
+# Data Collection Commands
+@cli.group()
+def collect():
+    """Data collection commands"""
+    pass
+
+
+@collect.command('trades')
+@click.option('--days', default=30, help='Number of days to look back')
+@click.option('--csv', type=click.Path(exists=True), help='Import from CSV file')
+def collect_trades(days, csv):
+    """Collect congressional trades"""
+    logger = get_logger()
+
+    with console.status("[bold green]Collecting congressional trades..."):
+        db = get_database()
+        collector = CongressionalTradeCollector(db=db.get_session())
+
+        if csv:
+            # Import from CSV
+            count = collector.import_from_csv(csv)
+            console.print(f"[green]✓[/green] Imported {count} trades from CSV")
+        else:
+            # Fetch from APIs
+            trades = collector.fetch_recent_trades(days_back=days)
+            count = collector.store_trades(trades)
+            console.print(f"[green]✓[/green] Collected and stored {count} new trades")
+
+
+@collect.command('prices')
+@click.option('--ticker', help='Update prices for specific ticker')
+@click.option('--days', default=30, help='Number of days to fetch')
+def collect_prices(ticker, days):
+    """Update stock price data"""
+    logger = get_logger()
+
+    with console.status("[bold green]Updating stock prices..."):
+        db = get_database()
+        collector = StockPriceCollector(db=db.get_session())
+
+        if ticker:
+            # Update single ticker
+            tickers = [ticker]
+        else:
+            # Get all tickers from recent trades
+            trade_collector = CongressionalTradeCollector(db=db.get_session())
+            start_date = date.today() - timedelta(days=days)
+            trades = trade_collector.get_historical_trades(start_date=start_date)
+            tickers = list(set(t.ticker for t in trades))
+
+        count = collector.update_prices_for_tickers(tickers, days_back=days)
+        console.print(f"[green]✓[/green] Updated {count} price records for {len(tickers)} tickers")
+
+
+# Scraping Commands
+@cli.group()
+def scrape():
+    """Scrape data from official government sources"""
+    pass
+
+
+@scrape.command('house')
+@click.option('--start-year', type=int, required=True, help='First year to scrape (e.g., 2021)')
+@click.option('--end-year', type=int, help='Last year to scrape (defaults to current year)')
+def scrape_house(start_year, end_year):
+    """
+    Scrape House of Representatives trade data from official XML files.
+
+    This downloads annual disclosure files from disclosures.house.gov
+    and parses all Periodic Transaction Reports (PTRs).
+
+    Example: python -m src.cli.cli scrape house --start-year 2021 --end-year 2023
+    """
+    logger = get_logger()
+
+    from datetime import datetime
+    if end_year is None:
+        end_year = datetime.now().year
+
+    console.print(f"\n[bold cyan]Scraping House Disclosures ({start_year}-{end_year})[/bold cyan]\n")
+    console.print("This will download official XML files from disclosures.house.gov")
+    console.print("and may take several minutes depending on the year range.\n")
+
+    # Progress tracking
+    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        console=console
+    ) as progress:
+
+        task = progress.add_task(
+            f"[cyan]Scraping {start_year}-{end_year}...",
+            total=100
+        )
+
+        db = get_database()
+        collector = CongressionalTradeCollector(db=db.get_session())
+
+        def update_progress(current, total):
+            percent = (current / total) * 100
+            progress.update(task, completed=percent)
+
+        try:
+            count = collector.scrape_house_data(
+                start_year=start_year,
+                end_year=end_year,
+                progress_callback=update_progress
+            )
+
+            progress.update(task, completed=100)
+
+            console.print(f"\n[green]✓[/green] Successfully scraped {count} House trades!")
+            console.print(f"\n[dim]Run 'python -m src.cli.cli status' to see updated database stats[/dim]")
+
+        except Exception as e:
+            console.print(f"\n[red]✗[/red] Error scraping data: {e}")
+            logger.error(f"Scraping failed: {e}", exc_info=True)
+
+
+@scrape.command('available-years')
+def scrape_available_years():
+    """Check which years of House data are available"""
+    logger = get_logger()
+
+    with console.status("[bold green]Checking available years..."):
+        db = get_database()
+        collector = CongressionalTradeCollector(db=db.get_session())
+        years = collector.get_house_available_years()
+
+    if years:
+        console.print(f"\n[bold cyan]Available House Disclosure Years:[/bold cyan]\n")
+
+        from datetime import datetime
+        current_year = datetime.now().year
+
+        for year in years:
+            marker = "[green]●[/green]" if year == current_year else "[dim]○[/dim]"
+            note = " [dim](current year)[/dim]" if year == current_year else ""
+            console.print(f"  {marker} {year}{note}")
+
+        console.print(f"\n[dim]To scrape: python -m src.cli.cli scrape house --start-year {years[0]} --end-year {years[-1]}[/dim]")
+    else:
+        console.print("[yellow]No years found (check internet connection)[/yellow]")
+
+
+# Analysis Commands
+@cli.command()
+@click.option('--days', default=30, help='Number of days to analyze')
+@click.option('--count', default=10, help='Number of recommendations to show')
+def recommendations(days, count):
+    """Show top trade recommendations"""
+    logger = get_logger()
+
+    with console.status("[bold green]Analyzing congressional trades..."):
+        db = get_database()
+        signal_gen = SignalGenerator(db=db.get_session())
+
+        signals = signal_gen.get_top_recommendations(count=count, lookback_days=days)
+
+    if not signals:
+        console.print("[yellow]No trade recommendations found[/yellow]")
+        return
+
+    # Display recommendations table
+    table = Table(title=f"Top {len(signals)} Trade Recommendations")
+    table.add_column("Ticker", style="cyan", no_wrap=True)
+    table.add_column("Signal", style="bold")
+    table.add_column("Confidence", style="magenta")
+    table.add_column("Supporting Trades", justify="right")
+    table.add_column("Reason")
+
+    for sig in signals:
+        signal_color = "green" if sig.signal == Signal.BUY else "red"
+        table.add_row(
+            sig.ticker,
+            f"[{signal_color}]{sig.signal.value}[/{signal_color}]",
+            f"{sig.confidence:.2%}",
+            str(len(sig.supporting_trades)),
+            sig.reason[:60] + "..." if len(sig.reason) > 60 else sig.reason
+        )
+
+    console.print(table)
+
+
+@cli.command()
+@click.argument('ticker')
+@click.option('--days', default=30, help='Number of days to analyze')
+def analyze(ticker, days):
+    """Analyze congressional trades for a specific ticker"""
+    logger = get_logger()
+
+    db = get_database()
+    signal_gen = SignalGenerator(db=db.get_session())
+    trade_collector = CongressionalTradeCollector(db=db.get_session())
+
+    # Get trades
+    trades = trade_collector.get_trades_for_ticker(ticker, days_back=days)
+
+    if not trades:
+        console.print(f"[yellow]No congressional trades found for {ticker}[/yellow]")
+        return
+
+    # Display trades
+    console.print(f"\n[bold cyan]{ticker} - Recent Congressional Trades[/bold cyan]\n")
+
+    table = Table()
+    table.add_column("Date", style="cyan")
+    table.add_column("Politician", style="white")
+    table.add_column("Party")
+    table.add_column("Type", style="bold")
+    table.add_column("Amount", justify="right")
+
+    for trade in trades:
+        trade_type_color = "green" if trade.transaction_type.lower() in ['purchase', 'buy'] else "red"
+        party_color = "blue" if trade.party == 'D' else "red" if trade.party == 'R' else "white"
+
+        table.add_row(
+            str(trade.transaction_date),
+            trade.politician_name,
+            f"[{party_color}]{trade.party}[/{party_color}]",
+            f"[{trade_type_color}]{trade.transaction_type}[/{trade_type_color}]",
+            trade.amount_range
+        )
+
+    console.print(table)
+
+    # Get signal
+    signal = signal_gen.analyze_ticker(ticker, lookback_days=days)
+
+    console.print(f"\n[bold]Signal:[/bold] ", end="")
+    signal_color = "green" if signal.signal == Signal.BUY else "red" if signal.signal == Signal.SELL else "yellow"
+    console.print(f"[{signal_color}]{signal.signal.value}[/{signal_color}]")
+    console.print(f"[bold]Confidence:[/bold] {signal.confidence:.2%}")
+    console.print(f"[bold]Reason:[/bold] {signal.reason}\n")
+
+
+@cli.command('politician-stats')
+@click.argument('politician_name')
+def politician_stats(politician_name):
+    """Show trading statistics for a politician"""
+    logger = get_logger()
+
+    db = get_database()
+    trade_collector = CongressionalTradeCollector(db=db.get_session())
+
+    trades = trade_collector.get_historical_trades(politician_name=politician_name)
+
+    if not trades:
+        console.print(f"[yellow]No trades found for {politician_name}[/yellow]")
+        return
+
+    # Calculate statistics
+    total_trades = len(trades)
+    buys = [t for t in trades if t.transaction_type.lower() in ['purchase', 'buy']]
+    sells = [t for t in trades if t.transaction_type.lower() in ['sale', 'sell']]
+
+    total_buy_value = sum(t.estimated_amount for t in buys)
+    total_sell_value = sum(t.estimated_amount for t in sells)
+
+    # Get unique tickers
+    tickers = set(t.ticker for t in trades)
+
+    # Display stats
+    console.print(f"\n[bold cyan]{politician_name} - Trading Statistics[/bold cyan]\n")
+
+    stats = Table(show_header=False, box=None)
+    stats.add_column("Metric", style="bold")
+    stats.add_column("Value")
+
+    stats.add_row("Total Trades", str(total_trades))
+    stats.add_row("Buy Trades", f"[green]{len(buys)}[/green]")
+    stats.add_row("Sell Trades", f"[red]{len(sells)}[/red]")
+    stats.add_row("Unique Tickers", str(len(tickers)))
+    stats.add_row("Total Buy Value", f"[green]{format_currency(total_buy_value)}[/green]")
+    stats.add_row("Total Sell Value", f"[red]{format_currency(total_sell_value)}[/red]")
+
+    if trades:
+        stats.add_row("Date Range", f"{min(t.transaction_date for t in trades)} to {max(t.transaction_date for t in trades)}")
+
+    console.print(stats)
+
+
+@cli.command()
+@click.option('--start', required=True, help='Start date (YYYY-MM-DD)')
+@click.option('--end', required=True, help='End date (YYYY-MM-DD)')
+@click.option('--capital', default=100000, help='Initial capital')
+@click.option('--politician', help='Filter by politician name')
+def backtest(start, end, capital, politician):
+    """Run backtest on historical data"""
+    logger = get_logger()
+
+    console.print("[yellow]Backtesting framework coming in Phase 2![/yellow]")
+    console.print(f"Parameters: {start} to {end}, ${capital:,.0f} capital")
+
+    # TODO: Implement backtesting in Phase 2
+
+
+@cli.command()
+def show_positions():
+    """Show current open positions"""
+    logger = get_logger()
+
+    db = get_database()
+    session = db.get_session()
+
+    from src.data.database import Position
+    positions = session.query(Position).all()
+
+    if not positions:
+        console.print("[yellow]No open positions[/yellow]")
+        return
+
+    table = Table(title="Current Positions")
+    table.add_column("Ticker", style="cyan")
+    table.add_column("Quantity", justify="right")
+    table.add_column("Entry Price", justify="right")
+    table.add_column("Current Price", justify="right")
+    table.add_column("P&L", justify="right")
+    table.add_column("P&L %", justify="right")
+    table.add_column("Mode")
+
+    for pos in positions:
+        pl_color = "green" if pos.unrealized_pnl and pos.unrealized_pnl > 0 else "red"
+
+        table.add_row(
+            pos.ticker,
+            str(pos.quantity),
+            format_currency(pos.average_entry_price),
+            format_currency(pos.current_price) if pos.current_price else "N/A",
+            f"[{pl_color}]{format_currency(pos.unrealized_pnl) if pos.unrealized_pnl else 'N/A'}[/{pl_color}]",
+            f"[{pl_color}]{format_percentage(pos.unrealized_pnl_pct) if pos.unrealized_pnl_pct else 'N/A'}[/{pl_color}]",
+            pos.mode
+        )
+
+    console.print(table)
+
+
+@cli.command('risk-settings')
+def risk_settings():
+    """Show current risk management settings"""
+    risk_mgr = RiskManager()
+    metrics = risk_mgr.get_risk_metrics()
+
+    console.print("\n[bold cyan]Risk Management Settings[/bold cyan]\n")
+
+    table = Table(show_header=False, box=None)
+    table.add_column("Setting", style="bold")
+    table.add_column("Value")
+
+    for key, value in metrics.items():
+        table.add_row(key.replace('_', ' ').title(), str(value))
+
+    console.print(table)
+
+
+@cli.command()
+def status():
+    """Show bot status and statistics"""
+    logger = get_logger()
+
+    db = get_database()
+    session = db.get_session()
+
+    from src.data.database import CongressionalTrade, ExecutedTrade, Position
+
+    # Get counts
+    total_congressional_trades = session.query(CongressionalTrade).count()
+    total_executed_trades = session.query(ExecutedTrade).count()
+    open_positions = session.query(Position).count()
+
+    # Get date ranges
+    latest_congressional_trade = session.query(CongressionalTrade).order_by(
+        CongressionalTrade.disclosure_date.desc()
+    ).first()
+
+    console.print("\n[bold cyan]Congressional Trading Bot Status[/bold cyan]\n")
+
+    table = Table(show_header=False, box=None)
+    table.add_column("Metric", style="bold")
+    table.add_column("Value")
+
+    table.add_row("Congressional Trades in DB", str(total_congressional_trades))
+    table.add_row("Executed Trades", str(total_executed_trades))
+    table.add_row("Open Positions", str(open_positions))
+
+    if latest_congressional_trade:
+        table.add_row("Latest Trade Disclosure", str(latest_congressional_trade.disclosure_date))
+
+    console.print(table)
+
+
+@cli.command()
+def version():
+    """Show version information"""
+    from src import __version__
+    console.print(f"Congressional Trading Bot v{__version__}")
+
+
+if __name__ == '__main__':
+    cli()
