@@ -4,12 +4,24 @@ A Python-based trading application that tracks congressional stock trades and re
 
 ## Features
 
-- **Data Collection**: Automatically collects congressional stock trade disclosures
+### Data Collection
+- **House Scraping**: Download all House trades from official XML files (2012-present)
+- **Senate Scraping**: Parse Senate PTR PDFs from EFDS (PDF parsing with AI)
+- **Coverage**: All 535 members of Congress (435 House + 100 Senate)
+- **Real-time Updates**: Scrape recent filings on-demand
+
+### Trading & Analysis
 - **Backtesting**: Test strategies against historical data
 - **Paper Trading**: Simulate trading without real money
 - **Automated Execution**: Execute trades with 20% profit threshold
 - **Risk Management**: Position sizing, profit targets, and stop losses
 - **Conflict Resolution**: Handle opposing trades from different politicians
+
+### AI Optimization (NEW!)
+- **Real-time Metrics**: Track signal accuracy and performance
+- **Multi-objective Scoring**: Evaluate on returns, Sharpe, win rate, drawdown
+- **Strategy Comparison**: See which conflict resolution method works best
+- **Performance Monitoring**: Detect degradation and optimize parameters
 
 ## Project Status
 
@@ -32,18 +44,49 @@ cp .env.example .env
 
 ## Quick Start
 
+### Scrape Congressional Data
+
 ```bash
-# Collect recent congressional trades
-python -m src.cli.cli collect-trades --days 30
+# Scrape House trades (fast, XML-based)
+python3 -m src.cli.cli scrape house --start-year 2023
 
-# Run a backtest
-python -m src.cli.cli backtest --start 2020-01-01 --end 2023-12-31 --capital 100000
+# Scrape Senate trades (PDF parsing)
+python3 -m src.cli.cli scrape senate --days 90 --max-filings 50
 
-# Start paper trading
-python -m src.cli.cli start-paper-trading
+# Scrape specific senator
+python3 -m src.cli.cli scrape senator Warren --days 90
 
+# Check what's available
+python3 -m src.cli.cli scrape available-years
+```
+
+### View & Analyze
+
+```bash
 # View current recommendations
-python -m src.cli.cli show-recommendations
+python3 -m src.cli.cli recommendations --days 30
+
+# Analyze specific stock
+python3 -m src.cli.cli analyze NVDA --days 30
+
+# View politician stats
+python3 -m src.cli.cli politician-stats "Nancy Pelosi"
+
+# Check bot status
+python3 -m src.cli.cli status
+```
+
+### AI Optimization
+
+```bash
+# View optimization metrics
+python3 -m src.cli.cli optimize status --window 30
+
+# Collect metrics
+python3 -m src.cli.cli optimize collect-metrics --window 30
+
+# View AI insights
+python3 -m src.cli.cli optimize insights --days 30
 ```
 
 ## Configuration
@@ -71,9 +114,40 @@ congressional-trading-bot/
 └── results/               # Backtest results
 ```
 
+## Documentation
+
+- **[SENATE_SCRAPING_GUIDE.md](SENATE_SCRAPING_GUIDE.md)** - Complete guide to Senate PDF scraping
+- **[OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md)** - AI optimization system documentation
+- **[QUICK_START_OPTIMIZATION.md](QUICK_START_OPTIMIZATION.md)** - Quick reference for optimization
+- **[SCRAPING_GUIDE.md](SCRAPING_GUIDE.md)** - House scraping documentation
+
+## Who Can You Track?
+
+### House (435 members) - ✅ Fully Automated
+- Nancy Pelosi (D-CA)
+- Kevin McCarthy (R-CA)
+- Alexandria Ocasio-Cortez (D-NY)
+- Marjorie Taylor Greene (R-GA)
+- All other House representatives
+
+### Senate (100 members) - ✅ Fully Automated
+- Elizabeth Warren (D-MA)
+- Ted Cruz (R-TX)
+- Bernie Sanders (I-VT)
+- Tommy Tuberville (R-AL)
+- All other Senators
+
+## Data Sources
+
+- **House:** disclosures.house.gov (XML files, 2012-present)
+- **Senate:** efdsearch.senate.gov (PTR PDFs, 2012-present)
+- **Both chambers:** Official government disclosure systems
+
 ## Disclaimer
 
 This software is for educational purposes only. Trading stocks involves risk. Past performance of congressional trades does not guarantee future results. Use at your own risk.
+
+All data comes from public disclosure filings required under the STOCK Act.
 
 ## License
 

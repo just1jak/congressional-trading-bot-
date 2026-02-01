@@ -161,7 +161,7 @@ class OptimizationMetric(Base):
     window_days = Column(Integer)  # 1, 7, 30, 90
     metric_type = Column(String(50), nullable=False, index=True)  # 'sharpe', 'win_rate', 'drawdown', etc.
     metric_value = Column(Float, nullable=False)
-    metadata = Column(Text)  # JSON for additional context
+    extra_metadata = Column(Text)  # JSON for additional context
 
     def __repr__(self):
         return f"<OptimizationMetric({self.metric_type}={self.metric_value:.4f}, window={self.window_days}d)>"

@@ -22,6 +22,12 @@ def _get_house_scraper():
     return HouseDisclosureScraper()
 
 
+def _get_senate_scraper():
+    """Lazy import of Senate scraper"""
+    from src.data.collectors.government_scrapers import SenateEFDSScraper
+    return SenateEFDSScraper()
+
+
 class CongressionalTradeCollector:
     """Collects congressional stock trade disclosures from various sources"""
 
@@ -375,3 +381,69 @@ class CongressionalTradeCollector:
         """
         scraper = _get_house_scraper()
         return scraper.get_available_years()
+
+    def scrape_senate_data(
+        self,
+        days_back: int = 90,
+        max_filings: int = 50,
+        progress_callback=None
+    ) -> int:
+        """
+        Scrape Senate PTR filings from EFDS.
+
+        This downloads and parses PDF disclosure files from efdsearch.senate.gov
+
+        Args:
+            days_back: Number of days to look back
+            max_filings: Maximum number of filings to process
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Number of new trades stored in database
+
+        Example:
+            collector = CongressionalTradeCollector()
+            count = collector.scrape_senate_data(days_back=30)
+            print(f"Imported {count} Senate trades")
+        """
+        logger.info(f"Scraping Senate data from last {days_back} days...")
+
+        # Get the scraper
+        scraper = _get_senate_scraper()
+
+        # Scrape the data
+        trades = scraper.scrape_recent(days=days_back, max_filings=max_filings)
+
+        # Store in database
+        count = self.store_trades(trades)
+
+        logger.info(f"Successfully scraped and stored {count} Senate trades")
+        return count
+
+    def scrape_senator_trades(
+        self,
+        senator_last_name: str,
+        days_back: int = 90
+    ) -> int:
+        """
+        Scrape trades for a specific senator.
+
+        Args:
+            senator_last_name: Senator's last name
+            days_back: Number of days to look back
+
+        Returns:
+            Number of trades stored
+
+        Example:
+            collector = CongressionalTradeCollector()
+            count = collector.scrape_senator_trades("Warren", days_back=30)
+        """
+        logger.info(f"Scraping trades for Senator {senator_last_name}...")
+
+        scraper = _get_senate_scraper()
+        trades = scraper.scrape_senator(senator_last_name, days_back=days_back)
+
+        count = self.store_trades(trades)
+        logger.info(f"Stored {count} trades for Senator {senator_last_name}")
+        return count

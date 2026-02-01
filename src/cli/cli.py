@@ -186,6 +186,110 @@ def scrape_available_years():
         console.print("[yellow]No years found (check internet connection)[/yellow]")
 
 
+@scrape.command('senate')
+@click.option('--days', type=int, default=90, help='Number of days to look back')
+@click.option('--max-filings', type=int, default=50, help='Maximum number of filings to process')
+def scrape_senate(days, max_filings):
+    """
+    Scrape Senate PTR (Periodic Transaction Report) filings.
+
+    This downloads PDF disclosure files from efdsearch.senate.gov
+    and extracts stock transaction data.
+
+    Example: python -m src.cli.cli scrape senate --days 30 --max-filings 25
+    """
+    logger = get_logger()
+
+    console.print(f"\n[bold cyan]Scraping Senate PTR Filings ({days} days)[/bold cyan]\n")
+    console.print("This will download and parse PDF files from efdsearch.senate.gov")
+    console.print(f"Processing up to {max_filings} recent filings.\n")
+
+    # Check if pdfplumber is installed
+    try:
+        import pdfplumber
+    except ImportError:
+        console.print("[red]Error: pdfplumber not installed[/red]")
+        console.print("Install with: [bold]pip install pdfplumber[/bold]\n")
+        return
+
+    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        console=console
+    ) as progress:
+
+        task = progress.add_task(
+            f"[cyan]Scraping Senate filings...",
+            total=100
+        )
+
+        db = get_database()
+        collector = CongressionalTradeCollector(db=db.get_session())
+
+        try:
+            count = collector.scrape_senate_data(
+                days_back=days,
+                max_filings=max_filings
+            )
+
+            progress.update(task, completed=100)
+
+            console.print(f"\n[green]✓[/green] Successfully scraped {count} Senate trades!")
+            console.print(f"\n[dim]Run 'python -m src.cli.cli status' to see updated database stats[/dim]")
+
+        except Exception as e:
+            console.print(f"\n[red]✗[/red] Error scraping data: {e}")
+            logger.error(f"Scraping failed: {e}", exc_info=True)
+
+
+@scrape.command('senator')
+@click.argument('last_name')
+@click.option('--days', type=int, default=90, help='Number of days to look back')
+def scrape_senator(last_name, days):
+    """
+    Scrape trades for a specific senator by last name.
+
+    Example: python -m src.cli.cli scrape senator Warren --days 30
+    """
+    logger = get_logger()
+
+    # Check if pdfplumber is installed
+    try:
+        import pdfplumber
+    except ImportError:
+        console.print("[red]Error: pdfplumber not installed[/red]")
+        console.print("Install with: [bold]pip install pdfplumber[/bold]\n")
+        return
+
+    console.print(f"\n[bold cyan]Scraping trades for Senator {last_name}[/bold cyan]\n")
+
+    with console.status(f"[bold green]Searching for {last_name} filings..."):
+        db = get_database()
+        collector = CongressionalTradeCollector(db=db.get_session())
+
+        try:
+            count = collector.scrape_senator_trades(
+                senator_last_name=last_name,
+                days_back=days
+            )
+
+            console.print(f"\n[green]✓[/green] Successfully scraped {count} trades for Senator {last_name}!")
+
+            if count == 0:
+                console.print(f"\n[yellow]No trades found. This could mean:[/yellow]")
+                console.print(f"  • No PTR filings in the last {days} days")
+                console.print(f"  • Senator name misspelled")
+                console.print(f"  • No stock transactions to report")
+
+        except Exception as e:
+            console.print(f"\n[red]✗[/red] Error: {e}")
+            logger.error(f"Scraping failed: {e}", exc_info=True)
+
+
 # Analysis Commands
 @cli.command()
 @click.option('--days', default=30, help='Number of days to analyze')
