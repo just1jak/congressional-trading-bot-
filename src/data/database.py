@@ -148,6 +148,122 @@ class StockPrice(Base):
         return f"<StockPrice({self.ticker}, {self.date}, ${self.close:.2f})>"
 
 
+# ============================================================================
+# AI OPTIMIZATION TABLES
+# ============================================================================
+
+class OptimizationMetric(Base):
+    """Track performance metrics over time"""
+    __tablename__ = 'optimization_metrics'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    window_days = Column(Integer)  # 1, 7, 30, 90
+    metric_type = Column(String(50), nullable=False, index=True)  # 'sharpe', 'win_rate', 'drawdown', etc.
+    metric_value = Column(Float, nullable=False)
+    metadata = Column(Text)  # JSON for additional context
+
+    def __repr__(self):
+        return f"<OptimizationMetric({self.metric_type}={self.metric_value:.4f}, window={self.window_days}d)>"
+
+
+class ParameterHistory(Base):
+    """Track all parameter changes"""
+    __tablename__ = 'parameter_history'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    parameter_name = Column(String(100), nullable=False, index=True)
+    old_value = Column(Text)
+    new_value = Column(Text)
+    reason = Column(Text)
+    changed_by = Column(String(50), nullable=False)  # 'auto', 'human', 'ml_model'
+    approval_request_id = Column(Integer, ForeignKey('approval_requests.id'))
+    performance_before = Column(Float)
+    performance_after = Column(Float)
+
+    def __repr__(self):
+        return f"<ParameterHistory({self.parameter_name}: {self.old_value} → {self.new_value})>"
+
+
+class ApprovalRequest(Base):
+    """Queue for human approval of major changes"""
+    __tablename__ = 'approval_requests'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    change_type = Column(String(50), nullable=False)  # 'strategy_switch', 'risk_adjustment', 'parameter_change'
+    current_config = Column(Text)  # JSON
+    proposed_config = Column(Text)  # JSON
+    reason = Column(Text)
+    expected_impact = Column(Text)  # JSON
+    backtest_results = Column(Text)  # JSON
+    llm_analysis = Column(Text)
+    urgency = Column(String(20), default='normal')  # 'low', 'normal', 'high'
+    status = Column(String(20), nullable=False, default='pending', index=True)  # 'pending', 'approved', 'rejected'
+    reviewed_by = Column(String(100))
+    reviewed_at = Column(DateTime)
+
+    def __repr__(self):
+        return f"<ApprovalRequest({self.change_type}, {self.status})>"
+
+
+class MLModelVersion(Base):
+    """Track ML model versions and performance"""
+    __tablename__ = 'ml_model_versions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    model_name = Column(String(100), nullable=False, index=True)
+    version = Column(String(50), nullable=False)
+    model_type = Column(String(50), nullable=False)  # 'xgboost', 'lstm', 'random_forest'
+    training_date = Column(DateTime, nullable=False, default=datetime.utcnow)
+    validation_score = Column(Float)
+    test_score = Column(Float)
+    is_active = Column(Boolean, default=False, index=True)
+    deployed_at = Column(DateTime)
+    model_path = Column(String(500))  # Path to saved model file
+    training_config = Column(Text)  # JSON
+
+    def __repr__(self):
+        return f"<MLModelVersion({self.model_name} v{self.version}, score={self.test_score:.4f})>"
+
+
+class SignalAccuracy(Base):
+    """Track signal predictions vs actual outcomes"""
+    __tablename__ = 'signal_accuracy'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    signal_timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    predicted_signal = Column(String(10), nullable=False)  # 'BUY', 'SELL', 'HOLD'
+    predicted_confidence = Column(Float, nullable=False)
+    actual_outcome = Column(String(20))  # 'profit', 'loss', 'no_trade'
+    actual_pnl_pct = Column(Float)
+    conflict_resolution_method = Column(String(50))
+    executed_trade_id = Column(Integer, ForeignKey('executed_trades.id'))
+
+    def __repr__(self):
+        return f"<SignalAccuracy({self.ticker}, {self.predicted_signal}, conf={self.predicted_confidence:.2f})>"
+
+
+class OptimizationInsight(Base):
+    """Knowledge base for AI-generated insights"""
+    __tablename__ = 'optimization_insights'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    insight_type = Column(String(50), nullable=False, index=True)  # 'llm_analysis', 'pattern', 'anomaly'
+    market_regime = Column(String(50))  # 'bull', 'bear', 'volatile', 'stable'
+    parameters_snapshot = Column(Text)  # JSON
+    performance_snapshot = Column(Text)  # JSON
+    insight_text = Column(Text, nullable=False)
+    tags = Column(Text)  # JSON array
+    source = Column(String(50), nullable=False)  # 'claude', 'ml_model', 'rule_based'
+
+    def __repr__(self):
+        return f"<OptimizationInsight({self.insight_type}, {self.source})>"
+
+
 class Database:
     """Database connection and session management"""
 

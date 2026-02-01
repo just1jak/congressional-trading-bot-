@@ -15,6 +15,22 @@ from src.utils.helpers import load_config
 
 logger = get_logger()
 
+# Import metrics collector (lazy import to avoid circular dependencies)
+_metrics_collector = None
+
+
+def get_metrics_collector():
+    """Get or create metrics collector instance"""
+    global _metrics_collector
+    if _metrics_collector is None:
+        try:
+            from src.optimization.metrics_collector import MetricsCollector
+            _metrics_collector = MetricsCollector()
+        except Exception as e:
+            logger.warning(f"Could not initialize MetricsCollector: {e}")
+            _metrics_collector = None
+    return _metrics_collector
+
 
 class Signal(Enum):
     """Trading signal types"""
@@ -100,6 +116,19 @@ class SignalGenerator:
         else:
             # Default to dollar weighted
             signal = self._analyze_dollar_weighted(buys, sells, ticker)
+
+        # Record signal for optimization tracking
+        try:
+            collector = get_metrics_collector()
+            if collector and signal.signal != Signal.HOLD:
+                collector.record_signal(
+                    ticker=ticker,
+                    signal=signal.signal.value,
+                    confidence=signal.confidence,
+                    conflict_resolution_method=self.conflict_resolution
+                )
+        except Exception as e:
+            logger.debug(f"Could not record signal for optimization: {e}")
 
         return signal
 

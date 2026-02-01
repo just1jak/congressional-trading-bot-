@@ -1,0 +1,167 @@
+# AI-in-the-Loop Optimization Configuration
+# Congressional Trading Bot
+
+optimization:
+  enabled: true
+  real_time_enabled: true  # Hourly optimization checks
+  batch_enabled: true  # Daily backtesting and model training
+
+  # Update frequencies (in hours)
+  metrics_collection_interval_seconds: 300  # 5 minutes
+  real_time_optimization_interval_hours: 1
+  batch_optimization_interval_hours: 24
+  llm_analysis_interval_hours: 168  # Weekly (7 days)
+
+  # Auto-adjustment settings
+  auto_approve_minor_changes: true
+  max_param_change_per_day: 0.05  # 5% maximum change per day
+  min_days_between_major_changes: 7
+
+  # Rollback triggers
+  performance_degradation_threshold: -0.10  # -10% degradation triggers rollback
+  rollback_lookback_days: 7
+
+# Multi-objective optimization weights
+# These determine how different performance metrics are weighted
+# when calculating the composite score
+objectives:
+  returns_weight: 0.30
+  sharpe_ratio_weight: 0.25
+  win_rate_weight: 0.20
+  drawdown_weight: 0.15  # Weight for minimizing drawdown (inverted)
+  profit_factor_weight: 0.10
+
+# Parameter bounds (safety limits)
+# Prevents the AI from making unsafe parameter changes
+parameter_bounds:
+  profit_threshold:
+    min: 0.15  # 15%
+    max: 0.30  # 30%
+    default: 0.20
+  stop_loss:
+    min: -0.20  # -20%
+    max: -0.05  # -5%
+    default: -0.10
+  max_position_size:
+    min: 0.02  # 2%
+    max: 0.10  # 10%
+    default: 0.05
+  min_confidence:
+    min: 0.50  # 50%
+    max: 0.90  # 90%
+    default: 0.60
+
+# ML Models configuration
+ml_models:
+  confidence_predictor:
+    enabled: true
+    model_type: 'xgboost'
+    retrain_frequency_days: 1
+    min_samples_for_training: 100
+    features:
+      - politician_track_record
+      - dollar_amount
+      - trade_timing
+      - sector
+      - party_alignment
+    hyperparameters:
+      max_depth: 6
+      learning_rate: 0.1
+      n_estimators: 100
+
+  exit_optimizer:
+    enabled: false  # Phase 5
+    model_type: 'lstm'
+    retrain_frequency_days: 7
+    min_samples_for_training: 500
+    sequence_length: 30
+
+  strategy_selector:
+    enabled: false  # Phase 5
+    model_type: 'random_forest'
+    retrain_frequency_days: 1
+    min_samples_for_training: 200
+
+# LLM Configuration (Claude API)
+llm:
+  provider: 'anthropic'
+  model: 'claude-sonnet-4-5-20250929'
+  api_key_env_var: 'ANTHROPIC_API_KEY'
+  max_tokens: 4000
+  temperature: 0.7
+
+  # LLM Analysis Features
+  weekly_analysis_enabled: true
+  monthly_strategy_review_enabled: true
+  trade_postmortem_enabled: true
+  trade_postmortem_threshold_pct: 0.15  # Analyze trades with >15% P&L
+
+  # Analysis prompts
+  weekly_report_enabled: true
+  anomaly_detection_enabled: true
+
+# Backtesting configuration
+backtesting:
+  enabled: true
+  nightly_sweep_enabled: true
+  walk_forward_validation: true
+
+  # Walk-forward settings
+  train_window_months: 6
+  test_window_months: 1
+
+  # Parameter sweep ranges
+  sweep_ranges:
+    profit_threshold: [0.15, 0.18, 0.20, 0.22, 0.25, 0.28, 0.30]
+    stop_loss: [-0.20, -0.15, -0.12, -0.10, -0.08, -0.06, -0.05]
+    conflict_resolution: ['dollar_weighted', 'unanimous_only', 'senator_track_record']
+
+# Approval queue settings
+approval_queue:
+  enabled: true
+
+  # Auto-approve criteria
+  auto_approve_minor_change_threshold: 0.05  # Changes <5%
+  auto_approve_within_historical_percentile: 0.80  # Within 80th percentile
+
+  # Requires approval
+  require_approval_for:
+    - strategy_switch
+    - parameter_change_above_threshold
+    - outside_historical_range
+    - market_regime_shift
+    - continuous_degradation
+
+  # Notification settings (for future email integration)
+  notifications_enabled: false
+  notification_email: null
+
+# Knowledge base settings
+knowledge_base:
+  enabled: true
+  max_insights_stored: 1000
+  insight_retention_days: 365
+
+  # Pattern recognition
+  pattern_detection_enabled: true
+  min_pattern_occurrences: 3
+
+# Safety and monitoring
+safety:
+  # Circuit breakers
+  max_consecutive_losses: 5
+  max_daily_loss_pct: 0.10  # 10%
+
+  # Monitoring
+  alert_on_degradation: true
+  alert_threshold_pct: -0.05  # Alert on 5% degradation
+
+  # Rollback
+  automatic_rollback_enabled: true
+  rollback_confirmation_required: false
+
+# Logging
+logging:
+  optimization_log_level: 'INFO'
+  save_optimization_decisions: true
+  log_file: 'logs/optimization.log'

@@ -439,5 +439,227 @@ def version():
     console.print(f"Congressional Trading Bot v{__version__}")
 
 
+# Optimization Commands
+@cli.group()
+def optimize():
+    """AI optimization system commands"""
+    pass
+
+
+@optimize.command('status')
+@click.option('--window', default=30, help='Time window in days')
+def optimization_status(window):
+    """Show AI optimization metrics and status"""
+    logger = get_logger()
+
+    try:
+        from src.optimization.performance_analyzer import PerformanceAnalyzer
+        from src.optimization.metrics_collector import MetricsCollector
+
+        analyzer = PerformanceAnalyzer()
+        collector = MetricsCollector()
+
+        with console.status("[bold green]Analyzing performance..."):
+            # Get performance summary
+            summary = analyzer.get_performance_summary(window_days=window)
+
+            if not summary:
+                console.print("[yellow]No optimization data available yet[/yellow]")
+                console.print("Run the bot and execute some trades to start collecting metrics.")
+                return
+
+        # Display composite score
+        console.print(f"\n[bold cyan]AI Optimization Status ({window}d window)[/bold cyan]\n")
+
+        score_table = Table(show_header=False, box=None)
+        score_table.add_column("Metric", style="bold")
+        score_table.add_column("Value")
+
+        composite_score = summary.get('composite_score', 0)
+        score_color = "green" if composite_score > 0.7 else "yellow" if composite_score > 0.5 else "red"
+        score_table.add_row("Composite Score", f"[{score_color}]{composite_score:.4f}[/{score_color}]")
+
+        # Component scores
+        components = summary.get('component_scores', {})
+        for component, value in components.items():
+            score_table.add_row(f"  {component.replace('_', ' ').title()}", f"{value:.4f}")
+
+        console.print(score_table)
+
+        # Raw metrics
+        console.print("\n[bold]Performance Metrics:[/bold]\n")
+        metrics_table = Table(show_header=False, box=None)
+        metrics_table.add_column("Metric", style="bold")
+        metrics_table.add_column("Value")
+
+        raw_metrics = summary.get('raw_metrics', {})
+        metrics_table.add_row("Win Rate", f"{raw_metrics.get('win_rate', 0):.2%}")
+        metrics_table.add_row("Avg Return", f"{raw_metrics.get('avg_return_pct', 0):.2%}")
+        metrics_table.add_row("Sharpe Ratio", f"{raw_metrics.get('sharpe_ratio', 0):.2f}")
+        metrics_table.add_row("Max Drawdown", f"{raw_metrics.get('max_drawdown', 0):.2%}")
+        metrics_table.add_row("Profit Factor", f"{raw_metrics.get('profit_factor', 0):.2f}")
+        metrics_table.add_row("Total Trades", f"{int(raw_metrics.get('total_trades', 0))}")
+
+        console.print(metrics_table)
+
+        # Signal accuracy by method
+        signal_accuracy = summary.get('signal_accuracy', {})
+        if signal_accuracy:
+            console.print("\n[bold]Signal Accuracy by Strategy:[/bold]\n")
+            acc_table = Table()
+            acc_table.add_column("Strategy", style="cyan")
+            acc_table.add_column("Accuracy", justify="right")
+            acc_table.add_column("Signals", justify="right")
+            acc_table.add_column("Avg P&L", justify="right")
+
+            for method, stats in signal_accuracy.items():
+                acc_color = "green" if stats['accuracy'] > 0.6 else "yellow" if stats['accuracy'] > 0.5 else "red"
+                acc_table.add_row(
+                    method,
+                    f"[{acc_color}]{stats['accuracy']:.2%}[/{acc_color}]",
+                    str(stats['total_signals']),
+                    f"{stats['avg_pnl_pct']:.2%}"
+                )
+
+            console.print(acc_table)
+
+        # Performance degradation warning
+        if summary.get('performance_degraded'):
+            console.print(f"\n[bold red]⚠️  Warning:[/bold red] {summary.get('degradation_reason')}")
+
+    except ImportError:
+        console.print("[red]Optimization module not fully installed. Run: pip install -r requirements.txt[/red]")
+    except Exception as e:
+        logger.error(f"Error displaying optimization status: {e}", exc_info=True)
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@optimize.command('review-pending')
+def review_pending():
+    """Review parameter changes awaiting approval"""
+    logger = get_logger()
+
+    try:
+        from src.data.database import ApprovalRequest
+
+        db = get_database()
+        session = db.get_session()
+
+        pending = (
+            session.query(ApprovalRequest)
+            .filter(ApprovalRequest.status == 'pending')
+            .order_by(ApprovalRequest.timestamp.desc())
+            .all()
+        )
+
+        if not pending:
+            console.print("[green]No pending approval requests[/green]")
+            return
+
+        console.print(f"\n[bold cyan]Pending Approval Requests ({len(pending)})[/bold cyan]\n")
+
+        for req in pending:
+            table = Table(title=f"Request #{req.id} - {req.change_type}", box=None)
+            table.add_column("Field", style="bold")
+            table.add_column("Value")
+
+            table.add_row("Timestamp", str(req.timestamp))
+            table.add_row("Urgency", req.urgency)
+            table.add_row("Reason", req.reason or "N/A")
+
+            if req.llm_analysis:
+                table.add_row("AI Analysis", req.llm_analysis[:200] + "..." if len(req.llm_analysis) > 200 else req.llm_analysis)
+
+            console.print(table)
+            console.print()
+
+        console.print("[dim]Use 'optimize approve <id>' or 'optimize reject <id>' to process requests[/dim]")
+        console.print("[dim](Approval/rejection commands coming in Phase 3)[/dim]\n")
+
+    except Exception as e:
+        logger.error(f"Error reviewing pending requests: {e}", exc_info=True)
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@optimize.command('insights')
+@click.option('--days', default=30, help='Days to look back')
+@click.option('--limit', default=10, help='Number of insights to show')
+def show_insights(days, limit):
+    """Show AI-generated insights"""
+    logger = get_logger()
+
+    try:
+        from src.data.database import OptimizationInsight
+        from datetime import timedelta
+
+        db = get_database()
+        session = db.get_session()
+
+        cutoff = datetime.now() - timedelta(days=days)
+
+        insights = (
+            session.query(OptimizationInsight)
+            .filter(OptimizationInsight.timestamp >= cutoff)
+            .order_by(OptimizationInsight.timestamp.desc())
+            .limit(limit)
+            .all()
+        )
+
+        if not insights:
+            console.print(f"[yellow]No insights found in the last {days} days[/yellow]")
+            console.print("[dim]Insights will be generated after LLM integration (Phase 4)[/dim]")
+            return
+
+        console.print(f"\n[bold cyan]AI Insights (last {days} days)[/bold cyan]\n")
+
+        for insight in insights:
+            console.print(f"[bold]{insight.insight_type}[/bold] - {insight.timestamp.strftime('%Y-%m-%d %H:%M')}")
+            console.print(f"Source: {insight.source}")
+            if insight.market_regime:
+                console.print(f"Market Regime: {insight.market_regime}")
+            console.print(f"\n{insight.insight_text}\n")
+            console.print("─" * 80 + "\n")
+
+    except Exception as e:
+        logger.error(f"Error showing insights: {e}", exc_info=True)
+        console.print(f"[red]Error: {e}[/red]")
+
+
+@optimize.command('collect-metrics')
+@click.option('--window', default=30, help='Time window in days')
+def collect_metrics(window):
+    """Manually trigger metrics collection and calculation"""
+    logger = get_logger()
+
+    try:
+        from src.optimization.metrics_collector import MetricsCollector
+
+        collector = MetricsCollector()
+
+        with console.status(f"[bold green]Calculating metrics for {window}d window..."):
+            metrics = collector.calculate_and_store_metrics(window_days=window)
+
+        if metrics:
+            console.print(f"\n[green]✓[/green] Metrics calculated and stored\n")
+
+            table = Table()
+            table.add_column("Metric", style="bold cyan")
+            table.add_column("Value", justify="right")
+
+            for metric_name, value in metrics.items():
+                if 'pct' in metric_name or 'rate' in metric_name:
+                    table.add_row(metric_name, f"{value:.2%}")
+                else:
+                    table.add_row(metric_name, f"{value:.4f}")
+
+            console.print(table)
+        else:
+            console.print("[yellow]No trades available to calculate metrics[/yellow]")
+
+    except Exception as e:
+        logger.error(f"Error collecting metrics: {e}", exc_info=True)
+        console.print(f"[red]Error: {e}[/red]")
+
+
 if __name__ == '__main__':
     cli()
