@@ -401,8 +401,8 @@ def politician_stats(politician_name):
     buys = [t for t in trades if t.transaction_type.lower() in ['purchase', 'buy']]
     sells = [t for t in trades if t.transaction_type.lower() in ['sale', 'sell']]
 
-    total_buy_value = sum(t.estimated_amount for t in buys)
-    total_sell_value = sum(t.estimated_amount for t in sells)
+    total_buy_value = sum(t.estimated_amount for t in buys if t.estimated_amount is not None)
+    total_sell_value = sum(t.estimated_amount for t in sells if t.estimated_amount is not None)
 
     # Get unique tickers
     tickers = set(t.ticker for t in trades)
@@ -763,6 +763,158 @@ def collect_metrics(window):
     except Exception as e:
         logger.error(f"Error collecting metrics: {e}", exc_info=True)
         console.print(f"[red]Error: {e}[/red]")
+
+
+# Backtest Commands
+@cli.group()
+def backtest():
+    """Backtesting commands for trading strategies"""
+    pass
+
+
+@backtest.command('run')
+@click.option('--strategy', type=click.Choice(['follow-all', 'top-performers', 'large-trades']),
+              default='follow-all', help='Strategy to backtest')
+@click.option('--start-date', type=click.DateTime(formats=["%Y-%m-%d"]),
+              help='Start date for backtest (YYYY-MM-DD)')
+@click.option('--end-date', type=click.DateTime(formats=["%Y-%m-%d"]),
+              help='End date for backtest (YYYY-MM-DD)')
+@click.option('--max-trades', type=int, help='Maximum number of trades to test (for quick testing)')
+@click.option('--min-value', type=float, help='Minimum trade value for follow-all strategy')
+def run_backtest(strategy, start_date, end_date, max_trades, min_value):
+    """Run a backtest for a trading strategy"""
+    logger = get_logger()
+
+    from src.backtest.engine import BacktestEngine
+    from src.backtest.strategies import FollowAllStrategy, TopPerformersStrategy, LargeTradesStrategy
+    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
+
+    console.print(f"\n[bold cyan]Running Backtest: {strategy.title()}[/bold cyan]\n")
+
+    # Initialize strategy
+    if strategy == 'follow-all':
+        strat = FollowAllStrategy(min_trade_value=min_value)
+    elif strategy == 'top-performers':
+        strat = TopPerformersStrategy(top_n_politicians=10)
+    else:  # large-trades
+        strat = LargeTradesStrategy(min_trade_value=min_value or 50000)
+
+    console.print(f"Strategy: {strat.description}\n")
+
+    # Initialize engine
+    engine = BacktestEngine()
+
+    # Progress tracking
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        console=console
+    ) as progress:
+
+        task = progress.add_task(
+            "[cyan]Running backtest...",
+            total=100
+        )
+
+        def update_progress(current, total):
+            pct = (current / total * 100) if total > 0 else 0
+            progress.update(task, completed=pct)
+
+        try:
+            # Run backtest
+            results = engine.run_backtest(
+                strategy=strat,
+                start_date=start_date,
+                end_date=end_date,
+                max_trades=max_trades,
+                progress_callback=update_progress
+            )
+
+            progress.update(task, completed=100)
+
+            # Display results
+            console.print(f"\n[bold green]✓ Backtest Complete[/bold green]\n")
+
+            # Overall metrics table
+            metrics = results['overall_metrics']
+
+            table = Table(title="Overall Performance Metrics")
+            table.add_column("Metric", style="bold cyan")
+            table.add_column("Value", justify="right", style="white")
+
+            table.add_row("Total Trades", str(metrics['total_trades']))
+            table.add_row("Winning Trades", str(metrics['total_wins']))
+            table.add_row("Losing Trades", str(metrics['total_losses']))
+            table.add_row("Win Rate", f"{metrics['win_rate']:.1%}")
+            table.add_row("─" * 20, "─" * 20)
+            table.add_row("Avg Return", f"{metrics['avg_return']:.2f}%",
+                         style="green" if metrics['avg_return'] > 0 else "red")
+            table.add_row("Total Return", f"{metrics['total_return']:.2f}%",
+                         style="green" if metrics['total_return'] > 0 else "red")
+            table.add_row("Best Trade", f"{metrics['best_trade']:.2f}%", style="green")
+            table.add_row("Worst Trade", f"{metrics['worst_trade']:.2f}%", style="red")
+            table.add_row("─" * 20, "─" * 20)
+            table.add_row("Sharpe Ratio", f"{metrics['sharpe_ratio']:.2f}")
+            table.add_row("Max Drawdown", f"{metrics['max_drawdown']:.2f}%", style="red")
+            table.add_row("Profit Factor", f"{metrics['profit_factor']:.2f}")
+
+            console.print(table)
+
+            # Holding period comparison
+            console.print("\n[bold cyan]Performance by Holding Period[/bold cyan]\n")
+
+            period_table = Table()
+            period_table.add_column("Holding Period", style="bold")
+            period_table.add_column("Trades", justify="right")
+            period_table.add_column("Avg Return", justify="right")
+            period_table.add_column("Win Rate", justify="right")
+            period_table.add_column("Sharpe Ratio", justify="right")
+
+            for period, period_metrics in results['metrics_by_holding_period'].items():
+                avg_ret = period_metrics['avg_return']
+                period_table.add_row(
+                    f"{period} days",
+                    str(period_metrics['total_trades']),
+                    f"{avg_ret:.2f}%",
+                    f"{period_metrics['win_rate']:.1%}",
+                    f"{period_metrics['sharpe_ratio']:.2f}",
+                    style="green" if avg_ret > 0 else "red"
+                )
+
+            console.print(period_table)
+
+            # Sample trades
+            if results['raw_results']:
+                console.print("\n[bold cyan]Sample Trades (First 10)[/bold cyan]\n")
+
+                sample_table = Table()
+                sample_table.add_column("Ticker", style="bold")
+                sample_table.add_column("Entry Date")
+                sample_table.add_column("Exit Date")
+                sample_table.add_column("Return", justify="right")
+                sample_table.add_column("Hold Period")
+
+                for r in results['raw_results'][:10]:
+                    ret = r.return_pct
+                    sample_table.add_row(
+                        r.ticker,
+                        r.entry_date.strftime("%Y-%m-%d"),
+                        r.exit_date.strftime("%Y-%m-%d"),
+                        f"{ret:.2f}%",
+                        f"{r.holding_period}d",
+                        style="green" if ret > 0 else "red"
+                    )
+
+                console.print(sample_table)
+
+            console.print(f"\n[dim]Tested {results['total_trades_tested']} trades, "
+                        f"{results['successful_trades']} with valid price data[/dim]\n")
+
+        except Exception as e:
+            logger.error(f"Backtest failed: {e}", exc_info=True)
+            console.print(f"\n[red]✗ Error: {e}[/red]")
 
 
 if __name__ == '__main__':
